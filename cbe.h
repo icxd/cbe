@@ -73,12 +73,37 @@ struct cbe_register {
 };
 
 struct cbe_stack_variable {
+  // [rsp - (8 * (slot + 1))]
   usz slot;
+};
+
+enum cbe_type_tag {
+  CBE_TYPE_BYTE,
+  CBE_TYPE_SHORT,
+  CBE_TYPE_INT,
+  CBE_TYPE_LONG,
+
+  CBE_TYPE_RAWPTR,
+  CBE_TYPE_PTR,
+};
+
+typedef usz cbe_type_id;
+struct cbe_type {
+  enum cbe_type_tag tag;
+  union {
+    cbe_type_id ptr;
+  };
+};
+
+struct cbe_global_variable {
+  bool constant; // Basically just specifies if the global is defined in the
+                 // rodata or data section.
 };
 
 struct cbe_context {
   struct cbe_register registers[CBE_REG_COUNT];
   slice(struct cbe_stack_variable) stack_variables;
+  slice(struct cbe_global_variable) global_variables;
 };
 
 void cbe_init(struct cbe_context *);
