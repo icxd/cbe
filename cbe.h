@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifndef CBE_ALLOC
 #define CBE_ALLOC a_alloc
@@ -84,6 +85,7 @@ struct cbe_register {
 };
 
 struct cbe_stack_variable {
+  usz associated_name_index;
   // [rsp - (8 * (slot + 1))]
   usz slot;
 };
@@ -171,9 +173,11 @@ struct cbe_global_variable {
 
 struct cbe_context {
   struct cbe_register registers[CBE_REG_COUNT];
+  slice(struct cbe_function) functions;
   slice(struct cbe_stack_variable) stack_variables;
   slice(struct cbe_global_variable) global_variables;
   slice(cstr) symbol_table;
+  slice(cstr) string_table;
 };
 
 enum cbe_validation_result {
@@ -187,7 +191,8 @@ usz cbe_next_unused_register(struct cbe_context *);
 usz cbe_allocate_register(struct cbe_context *);
 void cbe_free_register(struct cbe_context *, usz);
 
-usz cbe_allocate_stack_variable(struct cbe_context *);
+usz cbe_allocate_stack_variable(struct cbe_context *, usz);
+usz cbe_find_stack_variable(struct cbe_context *, usz);
 
 usz cbe_new_global_variable(struct cbe_context *, struct cbe_global_variable);
 
@@ -195,15 +200,23 @@ usz cbe_find_or_add_symbol(struct cbe_context *, cstr);
 usz cbe_find_symbol(struct cbe_context *, cstr);
 usz cbe_add_symbol(struct cbe_context *, cstr);
 
-enum cbe_validation_result validate_function(struct ctx_context *,
+void cbe_generate(struct cbe_context *, FILE *);
+void cbe_generate_function(struct cbe_context *, FILE *, struct cbe_function);
+void cbe_generate_block(struct cbe_context *, FILE *, struct cbe_block);
+void cbe_generate_instruction(struct cbe_context *, FILE *,
+                              struct cbe_instruction);
+void cbe_generate_value(struct cbe_context *, FILE *, struct cbe_value);
+void cbe_generate_type(struct cbe_context *, FILE *, struct cbe_type);
+
+enum cbe_validation_result validate_function(struct cbe_context *,
                                              struct cbe_function);
-enum cbe_validation_result validate_block(struct ctx_context *,
+enum cbe_validation_result validate_block(struct cbe_context *,
                                           struct cbe_block);
-enum cbe_validation_result validate_instruction(struct ctx_context *,
+enum cbe_validation_result validate_instruction(struct cbe_context *,
                                                 struct cbe_instruction);
-enum cbe_validation_result validate_value(struct ctx_context *,
+enum cbe_validation_result validate_value(struct cbe_context *,
                                           struct cbe_value);
-enum cbe_validation_result validate_type(struct ctx_context *, struct cbe_type);
+enum cbe_validation_result validate_type(struct cbe_context *, struct cbe_type);
 
 const char *cbe_register_name(usz);
 
