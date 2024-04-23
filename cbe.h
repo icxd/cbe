@@ -15,6 +15,20 @@
 #define CBE_REALLOC a_realloc
 #endif // CBE_REALLOC
 
+#define _STR(x) #x
+#define STR(x) _STR(x)
+
+#define CBE_ASSERT(...)                                                        \
+  do {                                                                         \
+    if (!(__VA_ARGS__)) {                                                      \
+      fprintf(stderr,                                                          \
+              "%s:%d (%s): \033[31;1mASSERTION FAILED: \033[0;0m" STR(         \
+                  __VA_ARGS__) "\n",                                           \
+              __FILE__, __LINE__, __FUNCTION__);                               \
+      exit(1);                                                                 \
+    }                                                                          \
+  } while (0)
+
 #define slice_init_capacity 16
 
 #define slice(T)                                                               \
@@ -84,12 +98,6 @@ struct cbe_register {
   bool used;
 };
 
-struct cbe_stack_variable {
-  usz associated_name_index;
-  // [rsp - (8 * (slot + 1))]
-  usz slot;
-};
-
 enum cbe_type_tag {
   CBE_TYPE_BYTE,
   CBE_TYPE_SHORT,
@@ -111,6 +119,7 @@ struct cbe_type {
 };
 
 enum cbe_value_tag {
+  CBE_VALUE_NIL,
   CBE_VALUE_INTEGER,
   CBE_VALUE_STRING,
   CBE_VALUE_VARIABLE,
@@ -125,6 +134,13 @@ struct cbe_value {
   };
 };
 
+struct cbe_stack_variable {
+  usz associated_name_index;
+  // [rsp - (8 * (slot + 1))]
+  usz slot;
+  struct cbe_value stored_value;
+};
+
 enum cbe_instruction_tag {
   CBE_INST_ALLOC, /* %0 = alloc <type> */
   CBE_INST_STORE, /* store <typed value>, <typed value> */
@@ -136,7 +152,7 @@ struct cbe_instruction {
   struct {
     usz name_index;
     cbe_type_id type_id;
-  } * temporary;
+  } temporary;
   union {
     struct {
       cbe_type_id type;
@@ -176,6 +192,7 @@ struct cbe_context {
   slice(struct cbe_function) functions;
   slice(struct cbe_stack_variable) stack_variables;
   slice(struct cbe_global_variable) global_variables;
+  slice(struct cbe_type) types;
   slice(cstr) symbol_table;
   slice(cstr) string_table;
 };
@@ -195,6 +212,8 @@ usz cbe_allocate_stack_variable(struct cbe_context *, usz);
 usz cbe_find_stack_variable(struct cbe_context *, usz);
 
 usz cbe_new_global_variable(struct cbe_context *, struct cbe_global_variable);
+
+cbe_type_id cbe_add_type(struct cbe_context *, struct cbe_type);
 
 usz cbe_find_or_add_symbol(struct cbe_context *, cstr);
 usz cbe_find_symbol(struct cbe_context *, cstr);

@@ -9,6 +9,7 @@ void cbe_init(struct cbe_context *ctx) {
   slice_init(&ctx->functions);
   slice_init(&ctx->stack_variables);
   slice_init(&ctx->global_variables);
+  slice_init(&ctx->types);
   slice_init(&ctx->symbol_table);
   slice_init(&ctx->string_table);
 }
@@ -36,9 +37,14 @@ void cbe_free_register(struct cbe_context *ctx, usz index) {
 
 usz cbe_allocate_stack_variable(struct cbe_context *ctx, usz name_index) {
   usz index = ctx->stack_variables.size;
-  slice_push(&ctx->stack_variables,
-             (struct cbe_stack_variable){.slot = index,
-                                         .associated_name_index = name_index});
+  struct cbe_value stored_value = {
+      .tag = CBE_VALUE_NIL,
+      .type_id = cbe_add_type(ctx, (struct cbe_type){CBE_TYPE_RAWPTR})};
+  slice_push(&ctx->stack_variables, (struct cbe_stack_variable){
+                                        .associated_name_index = name_index,
+                                        .slot = index,
+                                        .stored_value = stored_value,
+                                    });
   return index;
 }
 
@@ -55,6 +61,12 @@ usz cbe_new_global_variable(struct cbe_context *ctx,
                             struct cbe_global_variable variable) {
   usz index = ctx->global_variables.size;
   slice_push(&ctx->global_variables, variable);
+  return index;
+}
+
+cbe_type_id cbe_add_type(struct cbe_context *ctx, struct cbe_type type) {
+  usz index = ctx->types.size;
+  slice_push(&ctx->types, type);
   return index;
 }
 
@@ -110,11 +122,19 @@ void cbe_generate_instruction(struct cbe_context *ctx, FILE *fp,
                               struct cbe_instruction inst) {
   switch (inst.tag) {
   case CBE_INST_ALLOC:
-    (void)cbe_allocate_stack_variable(ctx, inst.temporary->name_index);
+    (void)cbe_allocate_stack_variable(ctx, inst.temporary.name_index);
     break; /* %0 = alloc <type> */
 
   case CBE_INST_STORE: {
-
+    __auto_type store = inst.store;
+    usz index = cbe_find_stack_variable(ctx, store.pointer.variable);
+    CBE_ASSERT(index != SIZE_MAX);
+    struct cbe_stack_variable stack_variable =
+        ctx->stack_variables.items[index];
+    stack_variable.stored_value = store.value;
+    fprintf(fp, "  mov [rsp - %zu], ", stack_variable.associated_name_index);
+    cbe_generate_value(ctx, fp, store.value);
+    fprintf(fp, "\n");
   } break; /* store <typed value>, <typed value> */
 
   case CBE_INST_LOAD: {
@@ -128,6 +148,10 @@ void cbe_generate_instruction(struct cbe_context *ctx, FILE *fp,
 void cbe_generate_value(struct cbe_context *ctx, FILE *fp,
                         struct cbe_value value) {
   switch (value.tag) {
+  case CBE_VALUE_NIL:
+    fprintf(fp, "0");
+    break;
+
   case CBE_VALUE_INTEGER:
     fprintf(fp, "%lld", value.integer);
     break;
@@ -138,14 +162,11 @@ void cbe_generate_value(struct cbe_context *ctx, FILE *fp,
     fprintf(fp, "str__%zu", string_index);
   } break;
 
-  case CBE_VALUE_VARIABLE:
-    if (cbe_find_stack_variable(ctx, value.variable) != SIZE_MAX)
-      fprintf(fp, "[rsp - %zu]", value.variable);
-    else {
-      fprintf(stderr, "TODO: cause i haven't figured it out yet.. >:(\n");
-      exit(1);
-    }
+  case CBE_VALUE_VARIABLE: {
+    CBE_ASSERT(cbe_find_stack_variable(ctx, value.variable) != SIZE_MAX);
+    fprintf(fp, "[rsp - %zu]", value.variable);
     break;
+  }
   }
 }
 
@@ -180,9 +201,9 @@ enum cbe_validation_result validate_type(struct cbe_context *ctx,
 const char *cbe_register_name(usz index) {
   if (index >= CBE_REG_COUNT)
     return "(null)";
-  static const char *names[] = {"eax",  "ebx",  "ecx",  "edx", "esi",  "edi",
-                                "ebp",  "esp",  "r8d",  "r9d", "r10d", "r11d",
-                                "r12d", "r13d", "r14d", "r15d"};
+  static const char *names[] = {"eax", "ebx", "ecx", "edx", "esi", "edi",
+                                "ebp", "esp", "r8",  "r9",  "r10", "r11",
+                                "r12", "r13", "r14", "r15"};
   return names[index];
 }
 
@@ -204,7 +225,8 @@ void cbe_debug_stack_variables(struct cbe_context *ctx) {
   printf("Stack-allocated variables: \n");
   for (usz i = 0; i < ctx->stack_variables.size; i++) {
     struct cbe_stack_variable variable = ctx->stack_variables.items[i];
-    printf("  {slot = %zu}\n", variable.slot);
+    printf("  {name_index = %zu, slot = %zu}\n", variable.associated_name_index,
+           variable.slot);
   }
   printf("\n");
 }
