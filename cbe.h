@@ -18,13 +18,14 @@
 #define _STR(x) #x
 #define STR(x) _STR(x)
 
-#define CBE_ASSERT(...)                                                        \
+#define CBE_ASSERT(ctx, ...)                                                   \
   do {                                                                         \
     if (!(__VA_ARGS__)) {                                                      \
       fprintf(stderr,                                                          \
               "%s:%d (%s): \033[31;1mASSERTION FAILED: \033[0;0m" STR(         \
                   __VA_ARGS__) "\n",                                           \
-              __FILE__, __LINE__, __FUNCTION__);                               \
+              __FILE__, __LINE__, __func__);                                   \
+      print_stacktrace(ctx);                                                   \
       exit(1);                                                                 \
     }                                                                          \
   } while (0)
@@ -55,6 +56,8 @@
     (s)->items[(s)->size++] = (__VA_ARGS__);                                   \
   } while (0)
 
+#define slice_pop(s) (s)->items[(s)->size--]
+
 typedef const char *cstr;
 
 typedef char i8;
@@ -68,6 +71,27 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 typedef unsigned long usz;
+
+struct cbe_stack_frame {
+  cstr file, fn;
+  usz line;
+};
+
+#ifdef CBE_ASSERTION_STACKTRACE
+#define push_stack_frame(ctx)                                                  \
+  do {                                                                         \
+    slice_push(&ctx->stacktrace,                                               \
+               (struct cbe_stack_frame){__FILE__, __func__, __LINE__});        \
+  } while (0)
+
+#define pop_stack_frame(ctx)                                                   \
+  do {                                                                         \
+    (void)slice_pop(&ctx->stacktrace);                                         \
+  } while (0)
+#else
+#define push_stack_frame(ctx)
+#define pop_stack_frame(ctx)
+#endif // CBE_ASSERTION_STACKTRACE
 
 enum {
   CBE_REG_EAX,
@@ -189,6 +213,7 @@ struct cbe_global_variable {
 
 struct cbe_context {
   struct cbe_register registers[CBE_REG_COUNT];
+  slice(struct cbe_stack_frame) stacktrace;
   slice(struct cbe_function) functions;
   slice(struct cbe_stack_variable) stack_variables;
   slice(struct cbe_global_variable) global_variables;
@@ -196,6 +221,13 @@ struct cbe_context {
   slice(cstr) symbol_table;
   slice(cstr) string_table;
 };
+
+static void print_stacktrace(struct cbe_context ctx) {
+  for (usz i = ctx.stacktrace.size; i > 0; i--) {
+    struct cbe_stack_frame frame = ctx.stacktrace.items[i - 1];
+    printf("  called from %s (%s:%zu)\n", frame.fn, frame.file, frame.line);
+  }
+}
 
 enum cbe_validation_result {
   CBE_VALID_OK,
@@ -227,19 +259,21 @@ void cbe_generate_instruction(struct cbe_context *, FILE *,
 void cbe_generate_value(struct cbe_context *, FILE *, struct cbe_value);
 void cbe_generate_type(struct cbe_context *, FILE *, struct cbe_type);
 
-enum cbe_validation_result validate_function(struct cbe_context *,
-                                             struct cbe_function);
-enum cbe_validation_result validate_block(struct cbe_context *,
-                                          struct cbe_block);
-enum cbe_validation_result validate_instruction(struct cbe_context *,
-                                                struct cbe_instruction);
-enum cbe_validation_result validate_value(struct cbe_context *,
-                                          struct cbe_value);
-enum cbe_validation_result validate_type(struct cbe_context *, struct cbe_type);
+enum cbe_validation_result cbe_validate_function(struct cbe_context *,
+                                                 struct cbe_function);
+enum cbe_validation_result cbe_validate_block(struct cbe_context *,
+                                              struct cbe_block);
+enum cbe_validation_result cbe_validate_instruction(struct cbe_context *,
+                                                    struct cbe_instruction);
+enum cbe_validation_result cbe_validate_value(struct cbe_context *,
+                                              struct cbe_value);
+enum cbe_validation_result cbe_validate_type(struct cbe_context *,
+                                             struct cbe_type);
 
-const char *cbe_register_name(usz);
+const char *cbe_register_name(struct cbe_context *, usz);
 
 void cbe_debug_registers(struct cbe_context *);
 void cbe_debug_stack_variables(struct cbe_context *);
+void cbe_debug_symbol_table(struct cbe_context *);
 
 #endif // CBE_H
