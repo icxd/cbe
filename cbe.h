@@ -77,6 +77,8 @@ struct cbe_stack_frame {
   usz line;
 };
 
+// #define CBE_ASSERTION_STACKTRACE
+
 #ifdef CBE_ASSERTION_STACKTRACE
 #define push_stack_frame(ctx)                                                  \
   do {                                                                         \
@@ -252,6 +254,8 @@ usz cbe_find_symbol(struct cbe_context *, cstr);
 usz cbe_add_symbol(struct cbe_context *, cstr);
 
 void cbe_generate(struct cbe_context *, FILE *);
+void cbe_generate_global_variable(struct cbe_context *, FILE *,
+                                  struct cbe_global_variable);
 void cbe_generate_function(struct cbe_context *, FILE *, struct cbe_function);
 void cbe_generate_block(struct cbe_context *, FILE *, struct cbe_block);
 void cbe_generate_instruction(struct cbe_context *, FILE *,

@@ -134,6 +134,16 @@ void cbe_generate(struct cbe_context *ctx, FILE *fp) {
     struct cbe_function fn = ctx->functions.items[i];
     cbe_generate_function(ctx, fp, fn);
   }
+  for (usz i = 0; i < ctx->global_variables.size; i++) {
+    struct cbe_global_variable variable = ctx->global_variables.items[i];
+    cbe_generate_global_variable(ctx, fp, variable);
+  }
+  pop_stack_frame(ctx);
+}
+
+void cbe_generate_global_variable(struct cbe_context *ctx, FILE *fp,
+                                  struct cbe_global_variable variable) {
+  push_stack_frame(ctx);
   pop_stack_frame(ctx);
 }
 
@@ -162,48 +172,20 @@ void cbe_generate_block(struct cbe_context *ctx, FILE *fp,
 void cbe_generate_instruction(struct cbe_context *ctx, FILE *fp,
                               struct cbe_instruction inst) {
   push_stack_frame(ctx);
+  printf("%u\n", inst.tag);
   switch (inst.tag) {
   case CBE_INST_ALLOC:
-    // Do nothing since the allocation happens in the validator
+    printf("allocating for %zu\n", inst.temporary.name_index);
+    (void)cbe_allocate_stack_variable(ctx, inst.temporary.name_index);
     break; /* %0 = alloc <type> */
 
   case CBE_INST_STORE: {
     __auto_type store = inst.store;
     CBE_ASSERT(*ctx, store.pointer.tag == CBE_VALUE_VARIABLE);
-    printf("%zu\n", store.pointer.variable);
-    usz index = cbe_find_stack_variable(ctx, store.pointer.variable);
-    CBE_ASSERT(*ctx, index != SIZE_MAX);
-    struct cbe_stack_variable stack_variable =
-        ctx->stack_variables.items[index];
-    stack_variable.stored_value = store.value;
-    fprintf(fp, "  mov ");
-    cbe_generate_value(
-        ctx, fp,
-        (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
-                           .variable = stack_variable.associated_name_index});
-    fprintf(fp, ", ");
-    cbe_generate_value(ctx, fp, store.value);
-    fprintf(fp, "\n");
+    // printf("%zu\n", store.pointer.variable);
   } break; /* store <typed value>, <typed temporary> */
 
   case CBE_INST_LOAD: {
-    __auto_type load = inst.load;
-    CBE_ASSERT(*ctx, load.pointer.tag == CBE_VALUE_VARIABLE);
-    usz index = cbe_find_stack_variable(ctx, load.pointer.variable);
-    CBE_ASSERT(*ctx, index != SIZE_MAX);
-    struct cbe_stack_variable stack_variable =
-        ctx->stack_variables.items[index];
-    fprintf(fp, "  mov ");
-    cbe_generate_value(
-        ctx, fp,
-        (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
-                           .variable = inst.temporary.name_index});
-    fprintf(fp, ", ");
-    cbe_generate_value(
-        ctx, fp,
-        (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
-                           .variable = stack_variable.associated_name_index});
-    fprintf(fp, "\n");
   } break; /* %0 = load <typed temporary> */
 
   case CBE_INST_RET: {
@@ -269,8 +251,6 @@ cbe_validate_instruction(struct cbe_context *ctx, struct cbe_instruction inst) {
   push_stack_frame(ctx);
   switch (inst.tag) {
   case CBE_INST_ALLOC:
-    printf("allocating for %zu\n", inst.temporary.name_index);
-    (void)cbe_allocate_stack_variable(ctx, inst.temporary.name_index);
     break;
 
   default:
