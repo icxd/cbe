@@ -30,7 +30,7 @@
     }                                                                          \
   } while (0)
 
-#define slice_init_capacity 16
+#define slice_init_capacity 256
 
 #define slice(T)                                                               \
   struct {                                                                     \
@@ -40,7 +40,8 @@
 
 #define slice_init(s)                                                          \
   do {                                                                         \
-    (s)->items = (__typeof__(*(s)->items) *)CBE_ALLOC(slice_init_capacity);    \
+    (s)->items = (__typeof__(*(s)->items) *)CBE_ALLOC(sizeof(*(s)->items) *    \
+                                                      slice_init_capacity);    \
     (s)->capacity = slice_init_capacity;                                       \
     (s)->size = 0;                                                             \
   } while (0)
@@ -51,7 +52,7 @@
       usz old_capacity = (s)->capacity;                                        \
       (s)->capacity *= 2;                                                      \
       (s)->items = (__typeof__(*(s)->items) *)CBE_REALLOC(                     \
-          (s)->items, old_capacity, (s)->capacity);                            \
+          (s)->items, old_capacity, sizeof(*(s)->items) * (s)->capacity);      \
     }                                                                          \
     (s)->items[(s)->size++] = (__VA_ARGS__);                                   \
   } while (0)
@@ -77,7 +78,7 @@ struct cbe_stack_frame {
   usz line;
 };
 
-// #define CBE_ASSERTION_STACKTRACE
+#define CBE_ASSERTION_STACKTRACE
 
 #ifdef CBE_ASSERTION_STACKTRACE
 #define push_stack_frame(ctx)                                                  \
@@ -139,9 +140,9 @@ enum cbe_type_tag {
 typedef usz cbe_type_id;
 struct cbe_type {
   enum cbe_type_tag tag;
-  union {
-    cbe_type_id ptr;
-  };
+  // union {
+  cbe_type_id ptr;
+  // };
 };
 
 enum cbe_value_tag {

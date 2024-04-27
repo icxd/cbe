@@ -54,7 +54,7 @@ usz cbe_allocate_stack_variable(struct cbe_context *ctx, usz name_index) {
   usz index = ctx->stack_variables.size;
   struct cbe_value stored_value = {
       .tag = CBE_VALUE_NIL,
-      .type_id = cbe_add_type(ctx, (struct cbe_type){CBE_TYPE_RAWPTR})};
+      .type_id = cbe_add_type(ctx, (struct cbe_type){.tag = CBE_TYPE_RAWPTR})};
   slice_push(&ctx->stack_variables, (struct cbe_stack_variable){
                                         .associated_name_index = name_index,
                                         .slot = index,
@@ -172,20 +172,48 @@ void cbe_generate_block(struct cbe_context *ctx, FILE *fp,
 void cbe_generate_instruction(struct cbe_context *ctx, FILE *fp,
                               struct cbe_instruction inst) {
   push_stack_frame(ctx);
-  printf("%u\n", inst.tag);
+  // printf("%u\n", inst.tag);
   switch (inst.tag) {
   case CBE_INST_ALLOC:
-    printf("allocating for %zu\n", inst.temporary.name_index);
     (void)cbe_allocate_stack_variable(ctx, inst.temporary.name_index);
     break; /* %0 = alloc <type> */
 
   case CBE_INST_STORE: {
     __auto_type store = inst.store;
     CBE_ASSERT(*ctx, store.pointer.tag == CBE_VALUE_VARIABLE);
-    // printf("%zu\n", store.pointer.variable);
+    usz index = cbe_find_stack_variable(ctx, store.pointer.variable);
+    CBE_ASSERT(*ctx, index != SIZE_MAX);
+    struct cbe_stack_variable stack_variable =
+        ctx->stack_variables.items[index];
+    fprintf(fp, "  mov ");
+    cbe_generate_value(
+        ctx, fp,
+        (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
+                           .variable = stack_variable.associated_name_index});
+    fprintf(fp, ", ");
+    cbe_generate_value(ctx, fp, store.value);
+    fprintf(fp, "\n");
   } break; /* store <typed value>, <typed temporary> */
 
   case CBE_INST_LOAD: {
+    __auto_type load = inst.load;
+    CBE_ASSERT(*ctx, load.pointer.tag == CBE_VALUE_VARIABLE);
+    usz index = cbe_find_stack_variable(ctx, load.pointer.variable);
+    printf("%zu\n", index);
+    CBE_ASSERT(*ctx, index != SIZE_MAX);
+    struct cbe_stack_variable stack_variable =
+        ctx->stack_variables.items[index];
+    fprintf(fp, "  mov ");
+    cbe_generate_value(
+        ctx, fp,
+        (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
+                           .variable = inst.temporary.name_index});
+    fprintf(fp, ", ");
+    cbe_generate_value(
+        ctx, fp,
+        (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
+                           .variable = stack_variable.associated_name_index});
+    fprintf(fp, "\n");
   } break; /* %0 = load <typed temporary> */
 
   case CBE_INST_RET: {

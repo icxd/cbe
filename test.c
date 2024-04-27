@@ -10,9 +10,10 @@ int main(void) {
 
   cbe_type_id int_type = cbe_add_type(&ctx, (struct cbe_type){CBE_TYPE_INT});
   cbe_type_id int_ptr_type = cbe_add_type(
-      &ctx, (struct cbe_type){
-                .tag = CBE_TYPE_PTR,
-                .ptr = cbe_add_type(&ctx, (struct cbe_type){CBE_TYPE_INT})});
+      &ctx,
+      (struct cbe_type){
+          .tag = CBE_TYPE_PTR,
+          .ptr = cbe_add_type(&ctx, (struct cbe_type){.tag = CBE_TYPE_INT})});
 
   struct cbe_function main = {
       .name_index = cbe_add_symbol(&ctx, "main"),
