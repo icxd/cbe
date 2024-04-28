@@ -8,6 +8,65 @@ int main(void) {
   struct cbe_context ctx;
   cbe_init(&ctx);
 
+  {
+    struct cbe_live_interval live_intervals[] = {
+        (struct cbe_live_interval){
+            .symbol = (struct cbe_register_symbol){.name = "a", .location = -1},
+            .start_point = 1,
+            .end_point = 4},
+        (struct cbe_live_interval){
+            .symbol = (struct cbe_register_symbol){.name = "b", .location = -1},
+            .start_point = 2,
+            .end_point = 6},
+        (struct cbe_live_interval){
+            .symbol = (struct cbe_register_symbol){.name = "c", .location = -1},
+            .start_point = 3,
+            .end_point = 10},
+        (struct cbe_live_interval){
+            .symbol = (struct cbe_register_symbol){.name = "d", .location = -1},
+            .start_point = 5,
+            .end_point = 9},
+        (struct cbe_live_interval){
+            .symbol = (struct cbe_register_symbol){.name = "e", .location = -1},
+            .start_point = 7,
+            .end_point = 8},
+    };
+
+    cbe_live_intervals active_intervals;
+    slice_init(&active_intervals);
+
+    // FIXME: sort live intervals
+    for (usz i = 0; i < CBE_ARRAY_LEN(live_intervals); i++) {
+      struct cbe_live_interval interval = live_intervals[i];
+      CBE_DEBUG(
+          "(%p). SYMBOL: %s | LOCATION: %d | STARTPOINT: %d | ENDPOINT: %d\n",
+          &live_intervals[i], interval.symbol.name, interval.symbol.location,
+          interval.start_point, interval.end_point);
+
+      cbe_expire_old_intervals(&ctx, active_intervals, &live_intervals[i]);
+
+      if (cbe_register_pool_is_empty(&ctx.register_pool)) {
+        cbe_spill_at_interval(&ctx, active_intervals, &live_intervals[i]);
+      } else {
+        enum cbe_register reg = cbe_get_register(&ctx.register_pool);
+        CBE_DEBUG("ACTION: ALLOCATE REGISTER %s(%d) TO INTERVAL (%p)\n",
+                  cbe_get_register_name(reg), reg, &live_intervals[i]);
+        if (reg != CBE_REG_ERROR)
+          live_intervals[i].symbol.reg = reg;
+        slice_push(&active_intervals, &live_intervals[i]);
+      }
+    }
+
+    for (usz i = 0; i < CBE_ARRAY_LEN(live_intervals); i++) {
+      struct cbe_live_interval interval = live_intervals[i];
+      CBE_DEBUG(
+          "symbol{name: %s, reg: %s, location: %d}\n", interval.symbol.name,
+          cbe_get_register_name(interval.symbol.reg), interval.symbol.location);
+    }
+
+    return 0;
+  }
+
   cbe_type_id int_type = cbe_add_type(&ctx, (struct cbe_type){CBE_TYPE_INT});
   cbe_type_id int_ptr_type = cbe_add_type(
       &ctx,
@@ -61,11 +120,11 @@ int main(void) {
 
   cbe_validate_function(&ctx, main);
 
-  cbe_debug_registers(&ctx);
-  cbe_debug_symbol_table(&ctx);
-  cbe_debug_stack_variables(&ctx);
-
   FILE *fp = fopen("out.s", "w");
   cbe_generate(&ctx, fp);
   fclose(fp);
+
+  cbe_debug_registers(&ctx);
+  cbe_debug_symbol_table(&ctx);
+  cbe_debug_stack_variables(&ctx);
 }

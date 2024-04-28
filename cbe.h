@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define CBE_LOG_DEBUG_MSG
+
 #ifndef CBE_ALLOC
 #define CBE_ALLOC a_alloc
 #endif // CBE_ALLOC
@@ -15,20 +17,37 @@
 #define CBE_REALLOC a_realloc
 #endif // CBE_REALLOC
 
-#define _STR(x) #x
-#define STR(x) _STR(x)
+#define CBE_STR_HELPER(s) #s
+#define CBE_STR(s) CBE_STR_HELPER(s)
+
+#define CBE_ARRAY_LEN(array) (sizeof(array) / sizeof(array[0]))
+
+#define CBE_SWAP(a, b)                                                         \
+  do {                                                                         \
+    __typeof__(a) tmp = (a);                                                   \
+    (a) = (b);                                                                 \
+    (b) = tmp;                                                                 \
+  } while (0)
 
 #define CBE_ASSERT(ctx, ...)                                                   \
   do {                                                                         \
     if (!(__VA_ARGS__)) {                                                      \
       fprintf(stderr,                                                          \
-              "%s:%d (%s): \033[31;1mASSERTION FAILED: \033[0;0m" STR(         \
+              "\033[0;1m%s:%d: \033[31;1mASSERTION FAILED: \033[0;0m" CBE_STR( \
                   __VA_ARGS__) "\n",                                           \
-              __FILE__, __LINE__, __func__);                                   \
+              __FILE__, __LINE__);                                             \
       print_stacktrace(ctx);                                                   \
       exit(1);                                                                 \
     }                                                                          \
   } while (0)
+
+#ifdef CBE_LOG_DEBUG_MSG
+#define CBE_DEBUG(s, ...)                                                      \
+  fprintf(stderr, "\033[0;1m%s:%d: \033[34;1mDEBUG: \033[0;0m" s, __FILE__,    \
+          __LINE__, __VA_ARGS__)
+#else
+#define CBE_DEBUG(...)
+#endif
 
 #define slice_init_capacity 256
 
@@ -43,6 +62,15 @@
     (s)->items = (__typeof__(*(s)->items) *)CBE_ALLOC(sizeof(*(s)->items) *    \
                                                       slice_init_capacity);    \
     (s)->capacity = slice_init_capacity;                                       \
+    (s)->size = 0;                                                             \
+  } while (0)
+
+#define slice_init_with_capacity(s, cap)                                       \
+  do {                                                                         \
+    usz capacity = (cap);                                                      \
+    (s)->items =                                                               \
+        (__typeof__(*(s)->items) *)CBE_ALLOC(sizeof(*(s)->items) * capacity);  \
+    (s)->capacity = capacity;                                                  \
     (s)->size = 0;                                                             \
   } while (0)
 
@@ -96,7 +124,9 @@ struct cbe_stack_frame {
 #define pop_stack_frame(ctx)
 #endif // CBE_ASSERTION_STACKTRACE
 
-enum {
+enum cbe_register {
+  CBE_REG_NONE,
+
   CBE_REG_EAX,
   CBE_REG_EBX,
   CBE_REG_ECX,
@@ -107,23 +137,40 @@ enum {
   CBE_REG_EBP,
   CBE_REG_ESP,
 
-  CBE_REG_R8,
-  CBE_REG_R9,
-  CBE_REG_R10,
-  CBE_REG_R11,
-  CBE_REG_R12,
-  CBE_REG_R13,
-  CBE_REG_R14,
-  CBE_REG_R15,
-
+  CBE_REG_ERROR,
   CBE_REG_COUNT,
 };
 
-struct cbe_register {
-  usz index;
+struct cbe_register_symbol {
   cstr name;
-  bool used;
+  enum cbe_register reg;
+  int location;
 };
+
+struct cbe_live_interval {
+  struct cbe_register_symbol symbol;
+  int location;
+  int start_point, end_point;
+};
+typedef slice(struct cbe_live_interval *) cbe_live_intervals;
+
+typedef slice(struct cbe_live_interval) cbe_by_start_point;
+typedef slice(struct cbe_live_interval *) cbe_by_end_point;
+
+int cbe_sort_by_end_point(const void *, const void *);
+
+void cbe_delete_interval(cbe_live_intervals *, usz);
+
+struct cbe_register_pool {
+  usz head;
+  enum cbe_register registers[CBE_REG_COUNT];
+  usz registers_count;
+};
+
+cstr cbe_get_register_name(enum cbe_register);
+enum cbe_register cbe_get_register(struct cbe_register_pool *);
+void cbe_free_register(struct cbe_register_pool *, enum cbe_register);
+bool cbe_register_pool_is_empty(struct cbe_register_pool *);
 
 enum cbe_type_tag {
   CBE_TYPE_BYTE,
@@ -215,7 +262,9 @@ struct cbe_global_variable {
 };
 
 struct cbe_context {
-  struct cbe_register registers[CBE_REG_COUNT];
+  struct cbe_register_pool register_pool;
+  int current_stack_location;
+
   slice(struct cbe_stack_frame) stacktrace;
   slice(struct cbe_function) functions;
   slice(struct cbe_stack_variable) stack_variables;
@@ -239,9 +288,11 @@ enum cbe_validation_result {
 
 void cbe_init(struct cbe_context *);
 
-usz cbe_next_unused_register(struct cbe_context *);
-usz cbe_allocate_register(struct cbe_context *);
-void cbe_free_register(struct cbe_context *, usz);
+cbe_live_intervals cbe_expire_old_intervals(struct cbe_context *,
+                                            cbe_live_intervals,
+                                            struct cbe_live_interval *);
+void cbe_spill_at_interval(struct cbe_context *, cbe_live_intervals,
+                           struct cbe_live_interval *);
 
 usz cbe_allocate_stack_variable(struct cbe_context *, usz);
 usz cbe_find_stack_variable(struct cbe_context *, usz);
