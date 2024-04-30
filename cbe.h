@@ -147,6 +147,7 @@ struct cbe_register_symbol {
   int location;
 };
 
+typedef usz cbe_interval_id;
 struct cbe_live_interval {
   struct cbe_register_symbol symbol;
   int location;
@@ -215,6 +216,12 @@ struct cbe_stack_variable {
   struct cbe_value stored_value;
 };
 
+struct cbe_temporary {
+  usz name_index;
+  cbe_type_id type_id;
+  cbe_interval_id interval_id;
+};
+
 enum cbe_instruction_tag {
   CBE_INST_ALLOC, /* %0 = alloc <type> */
   CBE_INST_STORE, /* store <typed value>, <typed value> */
@@ -223,10 +230,8 @@ enum cbe_instruction_tag {
 };
 struct cbe_instruction {
   enum cbe_instruction_tag tag;
-  struct {
-    usz name_index;
-    cbe_type_id type_id;
-  } temporary;
+  bool has_temporary;
+  struct cbe_temporary temporary;
   union {
     struct {
       cbe_type_id type;
@@ -270,6 +275,11 @@ struct cbe_context {
   slice(struct cbe_stack_variable) stack_variables;
   slice(struct cbe_global_variable) global_variables;
   slice(struct cbe_type) types;
+
+  slice(struct cbe_live_interval) live_intervals;
+  cbe_live_intervals active_intervals;
+  usz ip; // instruction pointer used for register allocation.
+
   slice(cstr) symbol_table;
   slice(cstr) string_table;
 };
@@ -305,6 +315,9 @@ usz cbe_find_or_add_symbol(struct cbe_context *, cstr);
 usz cbe_find_symbol(struct cbe_context *, cstr);
 usz cbe_add_symbol(struct cbe_context *, cstr);
 
+struct cbe_live_interval
+cbe_add_or_increment_live_interval(struct cbe_context *, cstr);
+
 void cbe_generate(struct cbe_context *, FILE *);
 void cbe_generate_global_variable(struct cbe_context *, FILE *,
                                   struct cbe_global_variable);
@@ -315,6 +328,7 @@ void cbe_generate_instruction(struct cbe_context *, FILE *,
 void cbe_generate_value(struct cbe_context *, FILE *, struct cbe_value);
 void cbe_generate_type(struct cbe_context *, FILE *, struct cbe_type);
 
+enum cbe_validation_result cbe_validate(struct cbe_context *);
 enum cbe_validation_result cbe_validate_function(struct cbe_context *,
                                                  struct cbe_function);
 enum cbe_validation_result cbe_validate_block(struct cbe_context *,

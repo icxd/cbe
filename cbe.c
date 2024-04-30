@@ -16,6 +16,11 @@ void cbe_init(struct cbe_context *ctx) {
   slice_init(&ctx->stack_variables);
   slice_init(&ctx->global_variables);
   slice_init(&ctx->types);
+
+  slice_init(&ctx->live_intervals);
+  slice_init(&ctx->active_intervals);
+  ctx->ip = 0;
+
   slice_init(&ctx->symbol_table);
   slice_init(&ctx->string_table);
   pop_stack_frame(ctx);
@@ -66,13 +71,32 @@ static cstr registers[] = {
 
 cstr cbe_get_register_name(enum cbe_register reg) { return registers[reg]; }
 
+static void *cbe_slice_array(void *arr, int elementSize, int start, int end) {
+  int size = (end - start + 1) * elementSize;
+  void *result = malloc(size);
+
+  if (result == NULL) {
+    printf("Memory allocation failed\n");
+    exit(1);
+  }
+
+  char *src = (char *)arr + start * elementSize;
+  memcpy(result, src, size);
+
+  return result;
+}
+
 enum cbe_register cbe_get_register(struct cbe_register_pool *pool) {
   if (pool->registers_count == 0)
     return CBE_REG_ERROR;
 
   enum cbe_register reg = pool->registers[0];
+  __auto_type regs = pool->registers;
+  int size = (CBE_ARRAY_LEN(regs) - 1 + 1) * sizeof(enum cbe_register);
+  char *src = (char *)regs + 1 * sizeof(enum cbe_register);
+  memcpy(pool->registers, src, size);
   pool->registers_count--;
-  // FIXME: needs to slice the first element off, not remove the last.
+
   return reg;
 }
 
@@ -187,6 +211,43 @@ usz cbe_add_symbol(struct cbe_context *ctx, cstr symbol) {
   return index;
 }
 
+usz cbe_find_interval(struct cbe_context *ctx, cstr interval_name) {
+  push_stack_frame(ctx);
+  for (usz i = 0; i < ctx->live_intervals.size; i++) {
+    struct cbe_live_interval interval = ctx->live_intervals.items[i];
+    if (interval.symbol.name == interval_name)
+      pop_stack_frame(ctx);
+    return i;
+  }
+  pop_stack_frame(ctx);
+  return SIZE_MAX;
+}
+
+struct cbe_live_interval
+cbe_add_or_increment_live_interval(struct cbe_context *ctx,
+                                   cstr interval_name) {
+  push_stack_frame(ctx);
+  usz interval_id = cbe_find_interval(ctx, interval_name);
+  if (interval_id == SIZE_MAX) {
+    slice_push(&ctx->live_intervals,
+               (struct cbe_live_interval){
+                   .symbol =
+                       (struct cbe_register_symbol){
+                           .name = interval_name,
+                           .reg = cbe_get_register(&ctx->register_pool),
+                           .location = -1},
+                   .start_point = ctx->ip,
+                   .end_point = ctx->ip,
+                   .location = -1,
+               });
+    interval_id = ctx->live_intervals.size - 1;
+  }
+  struct cbe_live_interval interval = ctx->live_intervals.items[interval_id];
+  interval.end_point += 1;
+  pop_stack_frame(ctx);
+  return interval;
+}
+
 void cbe_generate(struct cbe_context *ctx, FILE *fp) {
   push_stack_frame(ctx);
   for (usz i = 0; i < ctx->functions.size; i++) {
@@ -261,9 +322,9 @@ void cbe_generate_instruction(struct cbe_context *ctx, FILE *fp,
     CBE_ASSERT(*ctx, index != SIZE_MAX);
     struct cbe_stack_variable stack_variable =
         ctx->stack_variables.items[index];
-    // usz reg = cbe_allocate_register(ctx);
-    // CBE_ASSERT(*ctx, reg != SIZE_MAX);
-    // fprintf(fp, "  mov %s, ", ctx->registers[reg].name);
+
+    // enum cbe_register reg = cbe_get_register(&ctx->register_pool);
+    // fprintf(fp, "  mov %s, ");
     // cbe_generate_value(
     //     ctx, fp,
     //     (struct cbe_value){.tag = CBE_VALUE_VARIABLE,
@@ -308,10 +369,45 @@ void cbe_generate_value(struct cbe_context *ctx, FILE *fp,
 void cbe_generate_type(struct cbe_context *ctx, FILE *fp,
                        struct cbe_type type) {}
 
+enum cbe_validation_result cbe_validate(struct cbe_context *ctx) {
+  push_stack_frame(ctx);
+  for (usz i = 0; i < ctx->functions.size; i++) {
+    struct cbe_function fn = ctx->functions.items[i];
+    cbe_validate_function(ctx, fn);
+  }
+
+  for (usz i = 0; i < ctx->live_intervals.size; i++) {
+    struct cbe_live_interval interval = ctx->live_intervals.items[i];
+    CBE_DEBUG(
+        "(%p). SYMBOL: %s | LOCATION: %d | STARTPOINT: %d | ENDPOINT: %d\n",
+        &ctx->live_intervals.items[i], interval.symbol.name,
+        interval.symbol.location, interval.start_point, interval.end_point);
+
+    cbe_expire_old_intervals(ctx, ctx->active_intervals,
+                             &ctx->live_intervals.items[i]);
+
+    if (cbe_register_pool_is_empty(&ctx->register_pool)) {
+      cbe_spill_at_interval(ctx, ctx->active_intervals,
+                            &ctx->live_intervals.items[i]);
+    } else {
+      enum cbe_register reg = cbe_get_register(&ctx->register_pool);
+      CBE_DEBUG("ACTION: ALLOCATE REGISTER %s(%d) TO INTERVAL (%p)\n",
+                cbe_get_register_name(reg), reg, &ctx->live_intervals.items[i]);
+      if (reg != CBE_REG_ERROR)
+        ctx->live_intervals.items[i].symbol.reg = reg;
+      slice_push(&ctx->active_intervals, &ctx->live_intervals.items[i]);
+    }
+  }
+
+  pop_stack_frame(ctx);
+  return CBE_VALID_OK;
+}
+
 enum cbe_validation_result cbe_validate_function(struct cbe_context *ctx,
                                                  struct cbe_function fn) {
   push_stack_frame(ctx);
   for (usz i = 0; i < fn.blocks.size; i++) {
+    ctx->ip = 0;
     struct cbe_block block = fn.blocks.items[i];
     cbe_validate_block(ctx, block);
   }
@@ -333,13 +429,14 @@ enum cbe_validation_result cbe_validate_block(struct cbe_context *ctx,
 enum cbe_validation_result
 cbe_validate_instruction(struct cbe_context *ctx, struct cbe_instruction inst) {
   push_stack_frame(ctx);
-  switch (inst.tag) {
-  case CBE_INST_ALLOC:
-    break;
 
-  default:
-    break;
+  if (inst.has_temporary) {
+    struct cbe_live_interval live_interval = cbe_add_or_increment_live_interval(
+        ctx, ctx->symbol_table.items[inst.temporary.name_index]);
   }
+
+  ctx->ip++;
+
   pop_stack_frame(ctx);
   return CBE_VALID_OK;
 }
